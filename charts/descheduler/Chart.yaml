@@ -12,5 +12,5 @@ icon: https://kubernetes.io/images/favicon.png
 sources:
 - https://github.com/kubernetes-sigs/descheduler
 maintainers:
-- name: Kubernetes SIG Scheduling
-  email: kubernetes-sig-scheduling@googlegroups.com
+- name: knelasevero
+  email: lucassalves65@gmail.com
