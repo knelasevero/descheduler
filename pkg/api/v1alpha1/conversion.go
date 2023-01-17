@@ -19,8 +19,12 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/conversion"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/informers"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -30,7 +34,17 @@ import (
 	"sigs.k8s.io/descheduler/pkg/framework"
 	"sigs.k8s.io/descheduler/pkg/framework/pluginregistry"
 	"sigs.k8s.io/descheduler/pkg/framework/plugins/defaultevictor"
-	"sigs.k8s.io/descheduler/pkg/utils"
+)
+
+var (
+	// pluginArgConversionScheme is a scheme with internal and v1alpha2 registered,
+	// used for defaulting/converting typed PluginConfig Args.
+	// Access via getPluginArgConversionScheme()
+	pluginArgConversionScheme     *runtime.Scheme
+	initPluginArgConversionScheme sync.Once
+
+	Scheme = runtime.NewScheme()
+	Codecs = serializer.NewCodecFactory(Scheme, serializer.EnableStrict)
 )
 
 // evictorImpl implements the Evictor interface so plugins
@@ -91,8 +105,15 @@ func (hi *handleImpl) Evictor() framework.Evictor {
 	return hi.evictor
 }
 
+func Convert_v1alpha1_DeschedulerPolicy_To_api_DeschedulerPolicy(in *DeschedulerPolicy, out *api.DeschedulerPolicy, s conversion.Scope) error {
+	out, err := V1alpha1ToInternal(in, pluginregistry.PluginRegistry)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func V1alpha1ToInternal(
-	client clientset.Interface,
 	deschedulerPolicy *DeschedulerPolicy,
 	registry pluginregistry.Registry,
 ) (*api.DeschedulerPolicy, error) {
@@ -150,13 +171,9 @@ func V1alpha1ToInternal(
 						Name:  strategy.Params.ThresholdPriorityClassName,
 					}
 				}
-				thresholdPriority, err := utils.GetPriorityFromStrategyParams(context.TODO(), client, priorityThreshold)
-				if err != nil {
-					klog.ErrorS(err, "Failed to get threshold priority from strategy's params")
-					return nil, fmt.Errorf("failed to get threshold priority from strategy's params: %v", err)
-				}
 
 				var pluginConfig *api.PluginConfig
+				var err error
 				if pcFnc, exists := StrategyParamsToPluginArgs[string(name)]; exists {
 					pluginConfig, err = pcFnc(params)
 					if err != nil {
@@ -179,9 +196,7 @@ func V1alpha1ToInternal(
 								IgnorePvcPods:           ignorePvcPods,
 								EvictFailedBarePods:     evictBarePods,
 								NodeFit:                 nodeFit,
-								PriorityThreshold: &api.PriorityThreshold{
-									Value: &thresholdPriority,
-								},
+								PriorityThreshold:       priorityThreshold,
 							},
 						},
 						*pluginConfig,
